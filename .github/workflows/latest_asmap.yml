@@ -1,0 +1,33 @@
+name: Latest ASMap file
+
+on:
+  pull_request:
+    paths:
+      - '*.dat'
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    - name: Find lastest ASMap file by timestamp
+      id: find_latest
+      run: |
+        LATEST_FILE=$(ls -1 *_asmap.dat | grep -v "latest_asmap.dat" | sort -r | head -n 1)
+        echo "LATEST_FILE=$LATEST_FILE" >> $GITHUB_ENV
+
+    - name: Check latest_asmap.dat exists and matches the highest timestamped file
+      run: |
+        if [ ! -f "latest_asmap.dat" ]; then
+          echo "Error: latest_asmap.dat file is missing."
+          exit 1
+        fi
+
+        if ! cmp -s "$LATEST_FILE" "latest_asmap.dat"; then
+          echo "Error: latest_asmap.dat does not match the content of $LATEST_FILE."
+          exit 1
+        fi
+
+        echo "Success"
