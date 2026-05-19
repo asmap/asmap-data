@@ -3,6 +3,24 @@ export LC_ALL=C
 set -e -o pipefail
 
 ################
+# Helper: derive year from unix epoch
+################
+
+year_from_epoch() {
+    local epoch="$1"
+    if date -d "@${epoch}" +%Y >/dev/null 2>&1; then
+        # GNU date
+        date -d "@${epoch}" +%Y
+    elif date -r "${epoch}" +%Y >/dev/null 2>&1; then
+        # BSD / macOS date
+        date -r "${epoch}" +%Y
+    else
+        echo "ERR: Cannot determine year from epoch='${epoch}'. Is 'date' available?" >&2
+        exit 1
+    fi
+}
+
+################
 # Required non-builtin commands should be invocable
 ################
 
@@ -15,7 +33,7 @@ check_tools() {
     done
 }
 
-check_tools cat diff gpg basename
+check_tools cat diff gpg basename date
 
 ################
 # Usage
@@ -25,10 +43,10 @@ cmd_usage() {
 cat <<EOF
 Synopsis:
 
-    env [ ASMAP_SIGS_REPO=<path/to/asmap.sigs> ] \\
-        [ EPOCH=<unix_timestamp> ] \\
-        [ SIGNER=<signer> ] \\
-      ./contrib/asmap/asmap-verify
+    env [ ASMAP_DATA_REPO=<path/to/asmap-data> ] \
+        [ EPOCH=<unix_timestamp> ] \
+        [ SIGNER=<signer> ] \
+      ./asmap-verify
 
 Example verifying all epochs:
 
@@ -36,18 +54,18 @@ Example verifying all epochs:
 
 Example verifying a specific epoch:
 
-    env EPOCH=1772726379 \\
+    env EPOCH=1772726379 \
       ./asmap-verify
 
 Example using a specific sigs repo and signer's attestation as the compare base:
 
-    env ASMAP_SIGS_REPO=/home/user/asmap.sigs \\
-        SIGNER=satoshi \\
+    env ASMAP_DATA_REPO=/home/user/asmap-data \
+        SIGNER=satoshi \
       ./asmap-verify
 
 Environment variables:
 
-    ASMAP_SIGS_REPO  (optional) Path to the asmap.sigs repository clone
+    ASMAP_DATA_REPO  (optional) Path to the asmap-data repository clone
     EPOCH            (optional) Only verify this epoch; default: verify all epochs
     SIGNER           (optional) Use this signer's SHA256SUMS as the compare base;
                      default: use the first one found
@@ -56,32 +74,32 @@ EOF
 }
 
 ################
-# Assume current repo if empty 
+# Assume current repo if empty
 ################
 
-if [ -z "$ASMAP_SIGS_REPO" ]; then
-    ASMAP_SIGS_REPO="$PWD"
+if [ -z "$ASMAP_DATA_REPO" ]; then
+    ASMAP_DATA_REPO="$PWD"
 fi
 
 ################
-# ASMAP_SIGS_REPO should exist as a directory
+# ASMAP_DATA_REPO should exist as a directory
 ################
 
-if [ ! -d "$ASMAP_SIGS_REPO" ]; then
+if [ ! -d "$ASMAP_DATA_REPO" ]; then
 cat << EOF
-ERR: The specified ASMAP_SIGS_REPO is not an existent directory:
+ERR: The specified ASMAP_DATA_REPO is not an existent directory:
 
-    '$ASMAP_SIGS_REPO'
+    '$ASMAP_DATA_REPO'
 
 Hint: Please clone the asmap.sigs repository and point to it with the
-      ASMAP_SIGS_REPO environment variable.
+      ASMAP_DATA_REPO environment variable.
 
 EOF
 cmd_usage
 exit 1
 fi
 
-builder_keys_dir="$ASMAP_SIGS_REPO/builder-keys"
+builder_keys_dir="$ASMAP_DATA_REPO/builder-keys"
 
 ##############
 ##  Verify  ##
@@ -119,7 +137,8 @@ verify() {
 
 # Determine which epoch(s) to verify
 if [ -n "$EPOCH" ]; then
-    epoch_dirs=( "$ASMAP_SIGS_REPO/$EPOCH" )
+    YEAR="$(year_from_epoch "$EPOCH")"
+    epoch_dirs=( "$ASMAP_DATA_REPO/attestations/${YEAR}/${EPOCH}" )
     if [ ! -d "${epoch_dirs[0]}" ]; then
         echo "ERR: No epoch directory found for EPOCH='${EPOCH}':"
         echo "    '${epoch_dirs[0]}'"
@@ -128,24 +147,15 @@ if [ -n "$EPOCH" ]; then
     fi
 else
     shopt -s nullglob
-    epoch_dirs=( "$ASMAP_SIGS_REPO"/*/ )
+    epoch_dirs=( "$ASMAP_DATA_REPO"/attestations/*/*/ )
     shopt -u nullglob
-    # Exclude builder-keys and any other non-epoch dirs (not purely numeric)
-    filtered_epoch_dirs=()
-    for d in "${epoch_dirs[@]}"; do
-        dir_name="$(basename "$d")"
-        if [[ "$dir_name" =~ ^[0-9]+$ ]]; then
-            filtered_epoch_dirs+=("$d")
-        fi
-    done
-    epoch_dirs=("${filtered_epoch_dirs[@]}")
 fi
 
 if (( ${#epoch_dirs[@]} == 0 )); then
-    echo "ERR: No epoch directories found in '${ASMAP_SIGS_REPO}'"
+    echo "ERR: No epoch directories found in '${ASMAP_DATA_REPO}'"
     echo ""
-    echo "Hint: Expected directories named with Unix timestamps, e.g.:"
-    echo "      '${ASMAP_SIGS_REPO}/1772726379/'"
+    echo "Hint: Expected attestation directories of the form:"
+    echo "      '${ASMAP_DATA_REPO}/attestations/<year>/<epoch>/'"
     echo ""
     exit 1
 fi
@@ -216,4 +226,3 @@ fi
 
 echo "OK: All ${total_verified} attestation(s) verified successfully."
 echo ""
-

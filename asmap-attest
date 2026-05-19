@@ -15,7 +15,7 @@ check_tools() {
     done
 }
 
-check_tools cat env basename mkdir sha256sum mktemp diff
+check_tools cat env basename mkdir sha256sum mktemp diff date
 
 GPG=${GPG:-gpg}
 
@@ -51,8 +51,8 @@ Example:
       ./asmap-attest
 
     Outputs:
-      \$PWD/1772726379/satoshi/SHA256SUMS          (attestation)
-      \$PWD/1772726379/satoshi/SHA256SUMS.asc      (signature)
+      \$PWD/2026/attestations/1772726379/satoshi/SHA256SUMS          (attestation)
+      \$PWD/2026/attestations/1772726379/satoshi/SHA256SUMS.asc      (signature)
 
 Example w/o signing, just creating SHA256SUMS:
 
@@ -70,7 +70,7 @@ Environment variables:
     ASMAP_TXT         Path to the asmap text file (e.g. final_result.txt)
     ENCODED_FILLED    Path to the filled encoded binary (.dat)
     ENCODED_UNFILLED  Path to the unfilled encoded binary (.dat)
-    EPOCH             Unix timestamp used as the output folder name
+    EPOCH             Unix timestamp to identify the run
     NO_SIGN           If set and non-empty, skip GPG signing
     GPG               Override the gpg binary (default: gpg)
 
@@ -151,10 +151,34 @@ if [ -z "$NO_SIGN" ] && ! ${GPG} --dry-run --list-secret-keys "${SIGNER}" >/dev/
 fi
 
 ################
+# Helper: derive year from unix epoch
+################
+
+year_from_epoch() {
+    local epoch="$1"
+    if date -d "@${epoch}" +%Y >/dev/null 2>&1; then
+        # GNU date
+        date -d "@${epoch}" +%Y
+    elif date -r "${epoch}" +%Y >/dev/null 2>&1; then
+        # BSD / macOS date
+        date -r "${epoch}" +%Y
+    else
+        echo "ERR: Cannot determine year from epoch='${epoch}'. Is 'date' available?" >&2
+        exit 1
+    fi
+}
+
+################
+# Derive year from EPOCH
+################
+
+YEAR="$(year_from_epoch "$EPOCH")"
+
+################
 # Set up output directory
 ################
 
-signer_dir="${PWD}/${EPOCH}/${SIGNER}"
+signer_dir="${PWD}/attestations/${YEAR}/${EPOCH}/${SIGNER}"
 mkdir -p "$signer_dir"
 
 ##############
