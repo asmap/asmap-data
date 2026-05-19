@@ -1,0 +1,234 @@
+#!/usr/bin/env bash
+export LC_ALL=C
+set -e -o pipefail
+
+################
+# Required non-builtin commands should be invocable
+################
+
+check_tools() {
+    for cmd in "$@"; do
+        if ! command -v "$cmd" > /dev/null 2>&1; then
+            echo "ERR: This script requires that '$cmd' is installed and available in your \$PATH"
+            exit 1
+        fi
+    done
+}
+
+check_tools cat env basename mkdir sha256sum mktemp diff
+
+GPG=${GPG:-gpg}
+
+if [ -z "$NO_SIGN" ]; then
+    # shellcheck disable=SC2206
+    GPG_ARRAY=($GPG)
+    check_tools "${GPG_ARRAY[0]}"
+fi
+
+################
+# Usage
+################
+
+cmd_usage() {
+cat <<EOF
+Synopsis:
+
+    env SIGNER=<gpg-key-name> \\
+        ASMAP_TXT=<path/to/final_result.txt> \\
+        ENCODED_FILLED=<path/to/filled.dat> \\
+        ENCODED_UNFILLED=<path/to/unfilled.dat> \\
+        EPOCH=<unix_timestamp> \\
+        [ NO_SIGN=1 ] \\
+      ./asmap-attest
+
+Example:
+
+    env SIGNER=satoshi \\
+        ASMAP_TXT=/home/user/kartograf/out/1772726379/final_result.txt \\
+        ENCODED_FILLED=/home/user/kartograf/out/1772726379/filled.dat \\
+        ENCODED_UNFILLED=/home/user/kartograf/out/1772726379/unfilled.dat \\
+        EPOCH=1772726379 \\
+      ./asmap-attest
+
+    Outputs:
+      \$PWD/1772726379/satoshi/SHA256SUMS          (attestation)
+      \$PWD/1772726379/satoshi/SHA256SUMS.asc      (signature)
+
+Example w/o signing, just creating SHA256SUMS:
+
+    env SIGNER=satoshi \\
+        ASMAP_TXT=/home/user/kartograf/out/1772726379/final_result.txt \\
+        ENCODED_FILLED=/home/user/kartograf/out/1772726379/filled.dat \\
+        ENCODED_UNFILLED=/home/user/kartograf/out/1772726379/unfilled.dat \\
+        EPOCH=1772726379 \\
+        NO_SIGN=1 \\
+      ./asmap-attest
+
+Environment variables:
+
+    SIGNER            GPG key name used for signing
+    ASMAP_TXT         Path to the asmap text file (e.g. final_result.txt)
+    ENCODED_FILLED    Path to the filled encoded binary (.dat)
+    ENCODED_UNFILLED  Path to the unfilled encoded binary (.dat)
+    EPOCH             Unix timestamp used as the output folder name
+    NO_SIGN           If set and non-empty, skip GPG signing
+    GPG               Override the gpg binary (default: gpg)
+
+EOF
+}
+
+################
+# Required env vars should be non-empty
+################
+
+if [ -z "$SIGNER" ] || [ -z "$ASMAP_TXT" ] || [ -z "$ENCODED_FILLED" ] || [ -z "$ENCODED_UNFILLED" ] || [ -z "$EPOCH" ]; then
+    cmd_usage
+    exit 1
+fi
+
+################
+# Input files should exist and be readable
+################
+
+for var_name in ASMAP_TXT ENCODED_FILLED ENCODED_UNFILLED; do
+    file_path="${!var_name}"
+    if [ ! -f "$file_path" ]; then
+cat << EOF
+ERR: The specified ${var_name} does not exist or is not a regular file:
+
+    '$file_path'
+
+EOF
+        exit 1
+    fi
+    if [ ! -r "$file_path" ]; then
+cat << EOF
+ERR: The specified ${var_name} is not readable:
+
+    '$file_path'
+
+EOF
+        exit 1
+    fi
+done
+
+################
+# The SIGNER should have a corresponding .gpg key in builder-keys/
+################
+
+signer_key="builder-keys/${SIGNER}.gpg"
+if [ ! -f "$signer_key" ]; then
+cat << EOF
+ERR: No builder key found for signer '${SIGNER}':
+
+    '$signer_key'
+
+Hint: The SIGNER name must match a .gpg file under builder-keys/ in the
+      asmap.sigs repository (without the .gpg extension). Available signers:
+
+EOF
+    if [ -d "builder-keys" ]; then
+        for f in "builder-keys"/*.gpg; do
+            if [ -f "$f" ]; then
+                key_name="$(basename "$f" .gpg)"
+                echo "          ${key_name}"
+            fi
+        done
+    else
+        echo "          (builder-keys directory not found)"
+    fi
+    echo ""
+    exit 1
+fi
+
+################
+# The GPG key should be usable
+################
+
+if [ -z "$NO_SIGN" ] && ! ${GPG} --dry-run --list-secret-keys "${SIGNER}" >/dev/null 2>&1; then
+    echo "ERR: GPG can't seem to find any secret key named '${SIGNER}'"
+    exit 1
+fi
+
+################
+# Set up output directory
+################
+
+signer_dir="${PWD}/${EPOCH}/${SIGNER}"
+mkdir -p "$signer_dir"
+
+##############
+##  Attest  ##
+##############
+
+txt_basename="$(basename "$ASMAP_TXT")"
+filled_basename="$(basename "$ENCODED_FILLED")"
+unfilled_basename="$(basename "$ENCODED_UNFILLED")"
+
+txt_hash="$(sha256sum "$ASMAP_TXT" | cut -d' ' -f1)"
+filled_hash="$(sha256sum "$ENCODED_FILLED" | cut -d' ' -f1)"
+unfilled_hash="$(sha256sum "$ENCODED_UNFILLED" | cut -d' ' -f1)"
+
+sha256sums_file="$signer_dir/SHA256SUMS"
+
+temp_sha256sums="$(mktemp)"
+cat > "$temp_sha256sums" <<EOF
+${txt_hash}  ${txt_basename}
+${filled_hash}  ${filled_basename}
+${unfilled_hash}  ${unfilled_basename}
+EOF
+
+if [ -e "$sha256sums_file" ]; then
+    if diff -u "$sha256sums_file" "$temp_sha256sums" >/dev/null 2>&1; then
+        echo "A SHA256SUMS file already exists for signer '${SIGNER}' and epoch '${EPOCH}' and is up-to-date."
+        rm -f "$temp_sha256sums"
+    else
+        diff -u "$sha256sums_file" "$temp_sha256sums" || true
+        cat << EOF
+--
+
+ERR: A SHA256SUMS file already exists for signer '${SIGNER}' and epoch '${EPOCH}' and attests
+     differently. See the diff above for details.
+
+Hint: You may wish to remove the existing attestation and its signature by
+      invoking:
+
+          rm '${sha256sums_file}'{,.asc}
+
+      Then try running this script again.
+
+EOF
+        rm -f "$temp_sha256sums"
+        exit 1
+    fi
+else
+    mv "$temp_sha256sums" "$sha256sums_file"
+    echo "SHA256SUMS written to '$sha256sums_file'"
+fi
+echo ""
+
+##############
+##   Sign   ##
+##############
+
+if [ -z "$NO_SIGN" ]; then
+    if [ ! -e "$sha256sums_file".asc ]; then
+        ${GPG} --detach-sign \
+               --digest-algo sha256 \
+               --local-user "$SIGNER" \
+               --armor \
+               --output "$sha256sums_file".asc "$sha256sums_file"
+    else
+        echo "Signature '${sha256sums_file}.asc' already exists."
+    fi
+else
+    echo "Not signing SHA256SUMS as \$NO_SIGN is set"
+fi
+
+echo ""
+echo "Done. Results for epoch '${EPOCH}', signer '${SIGNER}':"
+echo "    ${sha256sums_file}   (attestation)"
+if [ -z "$NO_SIGN" ] && [ -e "$sha256sums_file".asc ]; then
+    echo "    ${sha256sums_file}.asc   (signature)"
+fi
+
