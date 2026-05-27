@@ -54,16 +54,6 @@ Example:
       \$PWD/2026/attestations/1772726379/satoshi/SHA256SUMS          (attestation)
       \$PWD/2026/attestations/1772726379/satoshi/SHA256SUMS.asc      (signature)
 
-Example w/o signing, just creating SHA256SUMS:
-
-    env SIGNER=satoshi \\
-        ASMAP_TXT=/home/user/kartograf/out/1772726379/final_result.txt \\
-        ENCODED_FILLED=/home/user/kartograf/out/1772726379/filled.dat \\
-        ENCODED_UNFILLED=/home/user/kartograf/out/1772726379/unfilled.dat \\
-        EPOCH=1772726379 \\
-        NO_SIGN=1 \\
-      ./asmap-attest
-
 Environment variables:
 
     SIGNER            GPG key name used for signing
