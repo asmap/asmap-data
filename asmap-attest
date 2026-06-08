@@ -58,8 +58,8 @@ Environment variables:
 
     SIGNER            GPG key name used for signing (REQUIRED)
     ASMAP_TXT         Path to the asmap text file (e.g. final_result.txt) (REQUIRED)
-    ENCODED_FILLED    Path to the filled encoded binary (.dat) (REQUIRED)
-    ENCODED_UNFILLED  Path to the unfilled encoded binary (.dat) (REQUIRED)
+    ENCODED_FILLED    Path to the filled encoded binary (.dat)
+    ENCODED_UNFILLED  Path to the unfilled encoded binary (.dat)
     EPOCH             Unix timestamp to identify the run (REQUIRED)
     NO_SIGN           If set and non-empty, skip GPG signing
     GPG               Override the gpg binary (default: gpg)
@@ -70,14 +70,42 @@ EOF
 # Required env vars should be non-empty
 ################
 
-if [ -z "$SIGNER" ] || [ -z "$ASMAP_TXT" ] || [ -z "$ENCODED_FILLED" ] || [ -z "$ENCODED_UNFILLED" ] || [ -z "$EPOCH" ]; then
+if [ -z "$SIGNER" ] || [ -z "$ASMAP_TXT" ] || [ -z "$EPOCH" ]; then
     cmd_usage
     exit 1
 fi
 
 ################
+# Helper: derive year from unix epoch
+################
+
+year_from_epoch() {
+    local epoch="$1"
+    if date -d "@${epoch}" +%Y >/dev/null 2>&1; then
+        # GNU date
+        date -d "@${epoch}" +%Y
+    elif date -r "${epoch}" +%Y >/dev/null 2>&1; then
+        # BSD / macOS date
+        date -r "${epoch}" +%Y
+    else
+        echo "ERR: Cannot determine year from epoch='${epoch}'. Is 'date' available?" >&2
+        exit 1
+    fi
+}
+
+################
+# Derive year from EPOCH
+################
+
+YEAR="$(year_from_epoch "$EPOCH")"
+
+################
 # Input files should exist and be readable
 ################
+
+
+export ENCODED_FILLED=${ENCODED_FILLED:-${YEAR}/${EPOCH}_asmap.dat}
+export ENCODED_UNFILLED=${ENCODED_UNFILLED:-${YEAR}/${EPOCH}_asmap_unfilled.dat}
 
 for var_name in ASMAP_TXT ENCODED_FILLED ENCODED_UNFILLED; do
     file_path="${!var_name}"
@@ -138,30 +166,6 @@ if [ -z "$NO_SIGN" ] && ! ${GPG} --dry-run --list-secret-keys "${SIGNER}" >/dev/
     echo "ERR: GPG can't seem to find any secret key named '${SIGNER}'"
     exit 1
 fi
-
-################
-# Helper: derive year from unix epoch
-################
-
-year_from_epoch() {
-    local epoch="$1"
-    if date -d "@${epoch}" +%Y >/dev/null 2>&1; then
-        # GNU date
-        date -d "@${epoch}" +%Y
-    elif date -r "${epoch}" +%Y >/dev/null 2>&1; then
-        # BSD / macOS date
-        date -r "${epoch}" +%Y
-    else
-        echo "ERR: Cannot determine year from epoch='${epoch}'. Is 'date' available?" >&2
-        exit 1
-    fi
-}
-
-################
-# Derive year from EPOCH
-################
-
-YEAR="$(year_from_epoch "$EPOCH")"
 
 ################
 # Set up output directory
