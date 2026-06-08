@@ -56,14 +56,13 @@ Example:
 
 Environment variables:
 
-    SIGNER            GPG key name used for signing
-    ASMAP_TXT         Path to the asmap text file (e.g. final_result.txt)
-    ENCODED_FILLED    Path to the filled encoded binary (.dat)
-    ENCODED_UNFILLED  Path to the unfilled encoded binary (.dat)
-    EPOCH             Unix timestamp to identify the run
+    SIGNER            GPG key name used for signing (REQUIRED)
+    ASMAP_TXT         Path to the asmap text file (e.g. final_result.txt) (REQUIRED)
+    ENCODED_FILLED    Path to the filled encoded binary (.dat) (REQUIRED)
+    ENCODED_UNFILLED  Path to the unfilled encoded binary (.dat) (REQUIRED)
+    EPOCH             Unix timestamp to identify the run (REQUIRED)
     NO_SIGN           If set and non-empty, skip GPG signing
     GPG               Override the gpg binary (default: gpg)
-
 EOF
 }
 
