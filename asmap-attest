@@ -51,8 +51,8 @@ Example:
       ./asmap-attest
 
     Outputs:
-      \$PWD/2026/attestations/1772726379/satoshi/SHA256SUMS          (attestation)
-      \$PWD/2026/attestations/1772726379/satoshi/SHA256SUMS.asc      (signature)
+      \$PWD/attestations/2026/1772726379/satoshi/SHA256SUMS          (attestation)
+      \$PWD/attestations/2026/1772726379/satoshi/SHA256SUMS.asc      (signature)
 
 Environment variables:
 
