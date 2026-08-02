@@ -1,0 +1,124 @@
+name: Aggregate Collaborative Hashes
+
+on:
+  issue_comment:
+    types: [created, edited, deleted]
+  issues:
+    types: [opened, edited]
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: Issue number to refresh
+        required: true
+        type: string
+
+concurrency:
+  group: hash-agg-${{ github.event.issue.number || github.event.inputs.issue_number }}
+  cancel-in-progress: true
+
+jobs:
+  update:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      startsWith(github.event.issue.title, 'Collaborative Launch')
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const MAGIC = '<!-- hash-aggregator-id: ae7c2bfe203c2f16d6574aae0e59e71d -->';
+            const SKIP = '<!--meta-tag:bot-skip-->';
+            const BOT = 'github-actions[bot]';
+            const { owner, repo } = context.repo;
+
+            // DrahtBot-style: ignore the bot's own comments (avoids edit loops)
+            if (context.eventName === 'issue_comment' &&
+                context.payload.comment.user.login === BOT) {
+              return;
+            }
+
+            function extractHash(line) {
+              if (line.trimStart().startsWith('>')) return null;
+              // Strip backticks/bold/italic wrappers; keyword is case-insensitive
+              const s = line.replace(/[`*_]+/g, '').trim();
+              const m = s.match(/^hash:\s*([0-9a-fA-F]{64})\s*$/i);
+              return m ? m[1].toLowerCase() : null;
+            }
+
+            function userLink(login) {
+              return `[${login}](https://github.com/${login})`;
+            }
+
+            let issue_number, title, state;
+            if (context.eventName === 'workflow_dispatch') {
+              issue_number = Number(context.payload.inputs.issue_number);
+              const issue = (await github.rest.issues.get({ owner, repo, issue_number })).data;
+              title = issue.title;
+              state = issue.state;
+            } else {
+              issue_number = context.issue.number;
+              title = context.payload.issue.title;
+              state = context.payload.issue.state;
+            }
+            if (!title.startsWith('Collaborative Launch')) return;
+            if (state !== 'open') return;
+
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner, repo, issue_number, per_page: 100,
+            });
+
+            // Per user: set of distinct hashes across all their comments
+            const userHashes = new Map();
+            for (const c of comments) {
+              const body = c.body || '';
+              if (body.includes(MAGIC) || body.includes(SKIP)) continue;
+              const login = c.user.login;
+              if (!userHashes.has(login)) userHashes.set(login, new Set());
+              for (const line of body.split('\n')) {
+                const hash = extractHash(line);
+                if (hash) userHashes.get(login).add(hash);
+              }
+            }
+
+            const byHash = new Map();
+            for (const [user, hashes] of userHashes) {
+              for (const hash of hashes) {
+                if (!byHash.has(hash)) byHash.set(hash, []);
+                byHash.get(hash).push(user);
+              }
+            }
+            const rows = [...byHash.entries()]
+              .map(([hash, users]) => ({ hash, users: users.sort() }))
+              .sort((a, b) => b.users.length - a.users.length || a.hash.localeCompare(b.hash));
+
+            const n = [...userHashes.values()].filter(s => s.size > 0).length;
+            let table = '| hash | users | share of matches |\n| --- | --- | --- |\n';
+            if (!rows.length) {
+              table += '| _none_ | | |\n';
+            } else {
+              for (const r of rows) {
+                table += `| \`${r.hash}\` | ${r.users.map(userLink).join(', ')} | ${r.users.length}/${n} |\n`;
+              }
+            }
+            const body = [
+              MAGIC,
+              '### Collaborative Launch Hashes',
+              '',
+              table,
+              '',
+              'Report with one line `HASH: <sha256>` per result.',
+              'If a comment should be ignored by this table, copy-paste <code>&lt;!--meta-tag:bot-skip--&gt;</code> into it.',
+              '',
+            ].join('\n');
+
+            // Only treat the summary as magic. Skip API write if unchanged.
+            const magic = comments.find(c =>
+              c.user.login === BOT && (c.body || '').includes(MAGIC));
+            if (magic) {
+              if (magic.body === body) return;
+              await github.rest.issues.updateComment({ owner, repo, comment_id: magic.id, body });
+            } else {
+              await github.rest.issues.createComment({ owner, repo, issue_number, body });
+            }
