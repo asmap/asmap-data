@@ -62,3 +62,14 @@ env EPOCH=177000000 \
 ```
 
 This will print out verifications for the relevant attestations in the `attestations` dir.
+
+## Note on reproducibility with kartograf
+
+The map results added to the repository since December 2025 can be reproduced from the raw download files that are [published as release artifacts](https://github.com/bitcoin-core/asmap-data/releases).
+However, reproduction requires using the right kartograf version that was used at the time to not receive a different result.
+See the following table to pick the right version if you want to reproduce historical asmap files from the download files.
+
+| Map timestamps | Kartograf version |
+| --- | --- |
+| <= 1786032000 | 0.4.13 (Gyoki) |
+| > 1786032000 | 0.5.0 (Braun) |
