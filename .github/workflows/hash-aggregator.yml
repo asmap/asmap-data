@@ -94,7 +94,7 @@ jobs:
               .sort((a, b) => b.users.length - a.users.length || a.hash.localeCompare(b.hash));
 
             const n = [...userHashes.values()].filter(s => s.size > 0).length;
-            let table = '| hash | users | share of matches |\n| --- | --- | --- |\n';
+            let table = '| hash | users | share of users |\n| --- | --- | --- |\n';
             if (!rows.length) {
               table += '| _none_ | | |\n';
             } else {
